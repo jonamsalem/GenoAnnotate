@@ -5,10 +5,13 @@ import argparse
 import logging
 from multiprocessing import Pool, cpu_count
 import subprocess
-
+from report import generate_report
 
 logging.basicConfig(
     level=logging.INFO)
+
+DEFAULT_VAF = 0.20 
+DP = 20 
 
 #read each vcf file and save fields to csv file using cyvcf2
 def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
@@ -25,7 +28,7 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
         return None, False  
 
     if provided_vaf == "":
-        provided_vaf = 0.20
+        provided_vaf = DEFAULT_VAF
     else:
         try:
             provided_vaf = float(provided_vaf)
@@ -55,7 +58,7 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
 
         try:
             dp_values = variant.format('DP')
-            if dp_values[0][0] < 20:
+            if dp_values[0][0] < DP:
                 pass_filters = False
 
             #calculate VAF from AD
@@ -99,7 +102,6 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
 #annotate vcf files using annovar
 def annovar_annotate(annovar_path, outputs_dir, file, ref):
     basename = file.split('/')[-1].split('.vcf')[0]  # Extract the base name of the file
-    print('ref:', ref)
     command_annovar = f"{annovar_path}/table_annovar.pl {file} {annovar_path}/humandb/ -buildver {ref} -protocol refGene,clinvar_20240917,revel -operation g,f,f -nastring . -vcfinput -out {outputs_dir}/annotated_{basename}"
     
     try:
@@ -131,11 +133,15 @@ def annotate(file, temp_dir, outputs_dir, chrom, start, end, vaf, annovar_path, 
         output_file_name = f"{outputs_dir}/annotated_{filename}.{ref}_multianno"
 
         #pull out the relevant columns into csv file and delete the temp files
-        command_csv = f"awk '{{print $1,$2,$3,$4,$5,$6,$7,$15,$24}}' {output_file_name}.txt > {output_file_name}.csv"
-        subprocess.run(command_csv, shell=True)
-        logging.info(f"Generated Annotated File: {output_file_name}.csv")
+        #todo: find better way to do this
+        command_txt = (
+            f"awk -F'\\t' 'BEGIN {{OFS=\"\\t\"}} {{print $1, $2, $3, $4, $5, $6, $7, $9, $15, $24}}' \"{output_file_name}.txt\" > \"{output_file_name}.filtered.{chrom}.txt\""
+        )
+        
+        subprocess.run(command_txt, shell=True)
+        logging.info(f"Generated Annotated File: {output_file_name}.txt")
 
-        command_cleanup = f"find . -name 'annotated_{basename}*' -not -name 'annotated_{basename}*.csv' -delete"
+        command_cleanup = f"find . -name 'annotated_{basename}*' -not -name 'annotated_{basename}*.filtered*' -delete"
         subprocess.run(command_cleanup, shell=True)
 
 
@@ -144,7 +150,6 @@ def annotate_wrapper(args):
     return annotate(*args)
 
 #main function to extract vcf data into temp csv files
-#todo: implement multiprocessing or convert to bash for parallel jobs
 def annotate_variants(temp_dir, outputs_dir, path, chrom,start="",end="", vaf="", annovar_path="", ref="hg38"):
     if annovar_path == "":
         logging.error("Invalid Annovar path. Please provide a valid path.")
@@ -156,7 +161,7 @@ def annotate_variants(temp_dir, outputs_dir, path, chrom,start="",end="", vaf=""
     
     args_list = [(file, temp_dir,outputs_dir, chrom, start, end, vaf, annovar_path, ref) for file in all_files]
 
-    # Use all available CPUs
+    #multiprocess the files
     with Pool(processes=cpu_count()) as pool:
         pool.map(annotate_wrapper, args_list)
     
@@ -176,6 +181,7 @@ if __name__ == "__main__":
     parser.add_argument("--vaf", default="", help="VAF threshold for filtering variants.")
     parser.add_argument("--annovar", default="", help="Annovar path to the directory containing annovar files.")
     parser.add_argument("--ref", default="hg38", help="Human reference genome version (default: hg38).")
+    parser.add_argument("--report", default="False", help="Generate aggregate report (default: False).")
 
     args = parser.parse_args()
     temp_dir = 'temp_vcfs' #temporary directory to store intermediate files
@@ -189,3 +195,9 @@ if __name__ == "__main__":
     #delete temp directory
     command_vcf_cleanp = f"rm -rf {temp_dir}"
     subprocess.run(command_vcf_cleanp, shell=True)
+
+    #generate report
+    if args.report.lower() == "true":
+        generate_report(outputs_dir)
+        logging.info("Generated HTML report.")
+

@@ -1,6 +1,6 @@
 # GenoAnnotate
 
-A Python tool for identifying pathogenic and novel genetic variants from per-sample VCF files.
+A Python tool for identifying pathogenic and novel genetic variants from per-sample VCF files, with automated report generation.
 ## Overview
 
 GenoAnnotate helps researchers and clinicians analyze genetic variants by:
@@ -8,7 +8,8 @@ GenoAnnotate helps researchers and clinicians analyze genetic variants by:
 - Filtering variants based on customizable criteria
 - Annotating variants with pathogenicity scores and functional predictions
 - Identifying novel variants not present in population databases
-- Generates CSV files with gene annotations, clinical significance from ClinVar (CLNSIG), and REVEL scores (pathogenicity predictions for missense variants).
+- Generates text files with gene annotations, clinical significance from ClinVar (CLNSIG), and REVEL scores (pathogenicity predictions for missense variants).
+- Generate **aggregate** CSV and HTML reports of all annotated variant text files.
 - 🚀 Coming Soon: No-Code Cloud Version for browser-based analysis
 
 ## Requirements
@@ -60,6 +61,7 @@ Command-line Flags
 | `--start`    | No       | Start genomic coordinate (e.g., `101397803`).|
 | `--end`      | No       | End genomic coordinate (e.g., `101407925`).|
 | `--ref`      | No       | Human reference genome version (hg38/hg19). Default is hg38. |
+| `--report`   | No       |Generate a CSV and HTML summary report. Default is false. |
 
 
 
@@ -110,7 +112,7 @@ This script will save the path to Annovar as well as download necessary database
 
 Clinvar provides clinically validated information about known variants
 
-REVEL helps predict the impact of novel or rare variants 
+Revel helps predict the impact of novel or rare variants 
 
 Refgene has gene definitions and information about gene structures in the human genome
 
