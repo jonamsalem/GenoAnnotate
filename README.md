@@ -2,6 +2,7 @@
 
 A Python tool for identifying pathogenic and novel genetic variants from VCF files.
 
+GenoAnnotate currently supports only hg38 data and is designed for per-sample VCFs.
 ## Overview
 
 GenoAnnotate helps researchers and clinicians analyze genetic variants by:
@@ -9,23 +10,26 @@ GenoAnnotate helps researchers and clinicians analyze genetic variants by:
 - Filtering variants based on customizable criteria
 - Annotating variants with pathogenicity scores and functional predictions
 - Identifying novel variants not present in population databases
+- Generates CSV files with gene annotations, clinical significance from ClinVar (CLNSIG), and REVEL scores (pathogenicity predictions for missense variants).
+- 🚀 Coming Soon: No-Code Cloud Version for browser-based analysis
 
 ## Requirements
 
-- Python 3.6+
+- Python 3.9+
 - cyvcf2 (`pip install cyvcf2`)
-- Properly formatted VCF files (bgzipped and indexed with tabix)
-- [`Annovar`](#annovar-instructions) (for local execution). See instructions below.
+- Properly formatted VCF files (bgzipped and indexed with tabix)!
+- [`Annovar`](#annovar-instructions) (required for local annotation). See instructions below.
+
 
 ## Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/GenoAnnotate.git
+git clone https://github.com/jonamsalem/GenoAnnotate.git
 cd GenoAnnotate
 
-# Install dependencies
-pip install -r requirements.txt 
+# Install dependencies and activate the environment (conda suggested)
+conda env create -f env.yaml
 ```
 
 ## Preparing VCF Files
@@ -51,20 +55,21 @@ Command-line Flags
 
 | Flag         | Required | Description                                                                 |
 |--------------|----------|-----------------------------------------------------------------------------|
-| `--path`     | Yes      | Path to the directory containing `.vcf.gz` files.                           |
+| `--path`     | Yes      | Path to the directory containing `.vcf.gz` files. VCF files can be nested in sub-directories.                          |
 | `--chrom`    | Yes      | Chromosome to extract from (e.g., `chrX`, `chr1`).                 |
 | `--annovar`  | Yes      | Full path to the ANNOVAR directory containing `table_annovar.pl` and `humandb/`. |
 | `--vaf`      | No       | Variant Allele Frequency threshold (e.g., `0.05`). Defaults to `0.05`.     |
-| `--start`    | No       | Start genomic coordinate (e.g., `101397803`). Optional if `--end` is not used. |
-| `--end`      | No       | End genomic coordinate (e.g., `101407925`). Optional if `--start` is not used. |
+| `--start`    | No       | Start genomic coordinate (e.g., `101397803`).|
+| `--end`      | No       | End genomic coordinate (e.g., `101407925`).|
 
 
 
 
 ## Annovar Instructions
 
-
 To run the program locally, [Annovar](https://annovar.openbioinformatics.org/en/latest/) must be installed.
+
+Note that HPC environments may already have Annovar installed. 
 
 **Option 1 (Preferred)**
 
@@ -84,10 +89,20 @@ After installation, navigate to the `annovar` directory and execute the followin
 ```bash
 ./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar clinvar_20240917 humandb/
 ./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar revel humandb/
-./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar gnomad_exome humandb/
+./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar refGene humandb/
+
+echo "export ANNOVAR_PATH=\"$(pwd)\"" >> ~/.bashrc
+source ~/.bashrc
+echo $ANNOVAR_PATH #copy the output as it will serve as the path for Annovar for GenoAnnotate
 ```
 
-These databases are used to annotate variant files. 
+This script will save the path to Annovar as well as download necessary databases for annotations 
+
+Clinvar provides clinically validated information about known variants
+
+REVEL helps predict the impact of novel or rare variants 
+
+Refgene has gene definitions and information about gene structures in the human genome
 
 
 ## Contributing

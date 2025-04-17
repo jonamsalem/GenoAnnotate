@@ -3,14 +3,26 @@ import os
 from cyvcf2 import VCF, Writer
 import argparse
 import logging
+from multiprocessing import Pool, cpu_count
+import subprocess
 
 
+logging.basicConfig(
+    level=logging.INFO)
 
 #read each vcf file and save fields to csv file using cyvcf2
 def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
     
     basename = os.path.basename(file)
-    filename = basename.split('.vcf')[0] #extract basename of file
+    filename = basename.split('.vcf')[0] #extract basename of file 
+    
+    #check if file is gzipped and indexed using tabix
+    if not file.endswith('.vcf.gz'):
+        logging.error(f"File {file} is not a gzipped VCF file.")
+        return
+    if not os.path.exists(file + '.tbi'):
+        logging.error(f"File {file} is not indexed. Please index the file before proceeding.")
+        return
 
     if provided_vaf == "":
         provided_vaf = 0.05
@@ -23,30 +35,28 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
 
 
     #check if file exists and if so add -1 to filename
-    output_file = f'{temp_dir}/{filename}.vcf'
+    output_file_name = f'{temp_dir}/{filename}'
 
-    if os.path.exists(output_file):
+    if os.path.exists(output_file_name + '.vcf'):
         logging.warning(f"File {filename}.vcf already exists. Adding '-1' to filename.")
-        output_file += '-1'
+        output_file_name += '-1'
     
 
     vcf = VCF(file)
     region = f"{chrom}:{start}-{end}"
     variants = list(vcf(region))  # Evaluate the iterator once
-    w = Writer(output_file, vcf)
+    w = Writer(output_file_name, vcf)
 
-    pass_filters = True
     wrote_to_file = False
-
-    # Filter variants based on quality and depth and write to VCF
+    variants_passed = 0
+    # Filter variants
     for variant in variants:
-        pass_filters = True  # Reset for the next variant
+        pass_filters = True 
 
         try:
-            if 'DP' in variant.FORMAT:
-                dp_values = variant.format('DP')
-                if dp_values[0][0] < 20:  # Minimum depth of 20
-                    pass_filters = False
+            dp_values = variant.format('DP')
+            if dp_values[0][0] < 20:
+                pass_filters = False
 
             #calculate VAF from AD
             ref_freq = variant.format('AD')[0][0]
@@ -56,11 +66,11 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
                 vaf = alt_freq / (ref_freq + alt_freq)
             else:
                 vaf = 0
-            if vaf < provided_vaf:  # Minimum VAF of 5%
+
+            if vaf < provided_vaf: 
                 pass_filters = False
            
-            # Filter based on quality
-            if variant.QUAL < 30:  # Minimum quality of 20
+            if variant.QUAL < 30:  
                 pass_filters = False   
              
         except Exception as e:
@@ -70,6 +80,7 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
         if pass_filters:
             w.write_record(variant)
             wrote_to_file = True
+            variants_passed += 1
         
     vcf.close()
     w.close()
@@ -77,14 +88,94 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
     # Check if any variants were written to the file
     if not wrote_to_file:
         logging.warning(f"No variants passed the filters for {file}")
-        os.remove(output_file)
+        os.remove(output_file_name)
 
+    logging.info(f"Extracted {variants_passed} variants from {file}")
 
-    return output_file, wrote_to_file, filename
+    return output_file_name, wrote_to_file
+
 
 
 #annotate vcf files using annovar
 def annovar_annotate(annovar_path, file):
     basename = file.split('/')[-1].split('.vcf')[0]  # Extract the base name of the file
-    command = f"{annovar_path}/table_annovar.pl  {file}  {annovar_path}/humandb/ -buildver hg38 -protocol refGene,clinvar_20240917,revel -operation g,f,f -nastring . -vcfinput -out annotated_{basename}"
-    os.
+    command_annovar = f"{annovar_path}/table_annovar.pl  {file}  {annovar_path}/humandb/ -buildver hg38 -protocol refGene,clinvar_20240917,revel -operation g,f,f -nastring . -vcfinput -out annotated_{basename}"
+    try:
+        subprocess.run(
+            command_annovar,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Annovar failed for {file} (exit {e.returncode}).")
+
+
+
+def annotate(file, temp_dir, chrom, start, end, vaf, annovar_path):
+    output_file, wrote_to_file = vcf_extract(file, temp_dir,chrom, start,end, vaf)
+    if wrote_to_file:
+        annovar_annotate(annovar_path, output_file)
+
+        #extract the relevant columns from the output text file
+        basename = os.path.basename(output_file)
+        filename = basename.split('.vcf')[0] 
+
+        output_file_name = f"annotated_{filename}.hg38_multianno"
+
+        #pull out the relevant columns into csv file and delete the temp files
+        command_csv = f"awk '{{print $1,$2,$3,$4,$5,$6,$7,$15,$24}}' {output_file_name}.txt > {output_file_name}.csv"
+        subprocess.run(command_csv, shell=True)
+        logging.info(f"Generated Annotated File: {output_file_name}.csv")
+
+        command_cleanup = f"find . -name 'annotated_{basename}*' -not -name 'annotated_{basename}*.csv' -delete"
+        subprocess.run(command_cleanup, shell=True)
+
+
+
+def annotate_wrapper(args):
+    return annotate(*args)
+
+#main function to extract vcf data into temp csv files
+#todo: implement multiprocessing or convert to bash for parallel jobs
+def annotate_variants(temp_dir, path, chrom,start="",end="", vaf="", annovar_path=""):
+    if annovar_path == "":
+        logging.error("Invalid Annovar path. Please provide a valid path.")
+        return
+    
+    command_find = 'find ' + path + ' -name "*.vcf.gz"' 
+    all_files = subprocess.check_output(command_find, shell=True).decode('utf-8').splitlines()
+
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    args_list = [(file, temp_dir, chrom, start, end, vaf, annovar_path) for file in all_files]
+
+    # Use all available CPUs
+    with Pool(processes=cpu_count()) as pool:
+        pool.map(annotate_wrapper, args_list)
+    
+    logging.info(f"{len(all_files)} VCF files processed.")
+
+                
+
+
+
+#function call and params
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Extract variant data from VCF files to CSV files.")
+    parser.add_argument("--path", help="Path to the directory containing VCF files.")
+    parser.add_argument("--chrom", required=True, help="Chromosome to extract (e.g., chrX).")
+    parser.add_argument("--start", default="", help="Start position of the region to extract.")
+    parser.add_argument("--end", default="", help="End position of the region to extract.")
+    parser.add_argument("--vaf", default="", help="VAF threshold for filtering variants.")
+    parser.add_argument("--annovar", default="", help="Annovar path to the directory containing annovar files.")
+
+    args = parser.parse_args()
+    temp_dir = 'temp_vcfs' #temporary directory to store intermediate files
+
+    annotate_variants(temp_dir=temp_dir, path=args.path, chrom=args.chrom, start=args.start, end=args.end, vaf=args.vaf, annovar_path=args.annovar)
+
+    #delete temp directory
+    command_vcf_cleanp = f"rm -rf {temp_dir}"
+    subprocess.run(command_vcf_cleanp, shell=True)
