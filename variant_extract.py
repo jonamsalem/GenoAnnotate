@@ -1,87 +1,90 @@
 import glob
 import os
-from cyvcf2 import VCF
-import pandas as pd
+from cyvcf2 import VCF, Writer
 import argparse
-import shutil
-import requests
+import logging
+
+
+
 #read each vcf file and save fields to csv file using cyvcf2
-def vcf_extract_csv(file,temp_dir, chrom, start,end):
+def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
+    
     basename = os.path.basename(file)
     filename = basename.split('.vcf')[0] #extract basename of file
+
+    if provided_vaf == "":
+        provided_vaf = 0.05
+    else:
+        try:
+            provided_vaf = float(provided_vaf)
+        except ValueError:
+            logging.error("Invalid VAF value. Please provide a numeric value.")
+            return
+
+
+    #check if file exists and if so add -1 to filename
+    output_file = f'{temp_dir}/{filename}.vcf'
+
+    if os.path.exists(output_file):
+        logging.warning(f"File {filename}.vcf already exists. Adding '-1' to filename.")
+        output_file += '-1'
+    
 
     vcf = VCF(file)
     region = f"{chrom}:{start}-{end}"
     variants = list(vcf(region))  # Evaluate the iterator once
-    
-    try:
-        df = pd.DataFrame({
-            'Chrom': [variant.CHROM for variant in variants],
-            'Reference': [variant.REF for variant in variants],
-            'Alternate': [variant.ALT[0] if variant.ALT else None for variant in variants],
-            'Position': [variant.POS for variant in variants],
-            'Depth': [variant.format('DP')[0] if variant.format('DP') else None for variant in variants],
-            'Quality': [variant.QUAL for variant in variants],
-            'Allelic_depth': [variant.format('AD')[0].tolist() if variant.format('AD') is not None and len(variant.format('AD')[0]) > 0 else None for variant in variants]})
-    except ValueError as e:
-        print(f"ValueError during DataFrame creation: {e}")
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        return pd.DataFrame()
+    w = Writer(output_file, vcf)
 
-    vcf.close() #close file
+    pass_filters = True
+    wrote_to_file = False
 
-    #check if file exists and if so add 1
-    if os.path.exists(f'{temp_dir}/{filename}.csv'):
-        filename += '-1'
+    # Filter variants based on quality and depth and write to VCF
+    for variant in variants:
+        pass_filters = True  # Reset for the next variant
 
-    df.to_csv(f"{temp_dir}/{filename}.csv")
+        try:
+            if 'DP' in variant.FORMAT:
+                dp_values = variant.format('DP')
+                if dp_values[0][0] < 20:  # Minimum depth of 20
+                    pass_filters = False
 
+            #calculate VAF from AD
+            ref_freq = variant.format('AD')[0][0]
+            alt_freq = variant.format('AD')[0][1]
+           
+            if ref_freq + alt_freq > 0:
+                vaf = alt_freq / (ref_freq + alt_freq)
+            else:
+                vaf = 0
+            if vaf < provided_vaf:  # Minimum VAF of 5%
+                pass_filters = False
+           
+            # Filter based on quality
+            if variant.QUAL < 30:  # Minimum quality of 20
+                pass_filters = False   
+             
+        except Exception as e:
+            logging.error(f"Error processing variant {variant}: {e}")
+            pass_filters = False
 
-#main function to extract vcf data into temp csv files
-#todo: implement multiprocessing or convert to bash for parallel jobs
-def extract_variants(temp_dir, path, chrom,start="",end=""):
-    path = '{}/*.vcf.gz'.format(path)
-    all_files = glob.glob(path)
-    os.makedirs(temp_dir, exist_ok=True)
-    for file in all_files:
-       vcf_extract_csv(file, temp_dir,chrom, start,end)
+        if pass_filters:
+            w.write_record(variant)
+            wrote_to_file = True
+        
+    vcf.close()
+    w.close()
 
-def extract_annotations(chrom, start, end):
-    #use myvariant.info API to get annotations which has an aggregate of different databases
-    base_url = "https://myvariant.info/v1/query"
-    query_string = f"{chrom}:{start}-{end}"
-    params = {
-        'q': query_string,
-        'assembly': 'hg38',  # Explicitly specify GRCh38
-    }
-
-    try:
-        response = requests.get(base_url, params=params)
-        response.raise_for_status()  # Raise an exception for bad status codes
-        annotations = response.json()
-
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching annotations: {e}")
-        return
-    except Exception as e:
-        print(f"Error parsing JSON response: {e}")
-        return
-    print(annotations)
+    # Check if any variants were written to the file
+    if not wrote_to_file:
+        logging.warning(f"No variants passed the filters for {file}")
+        os.remove(output_file)
 
 
-#function call and params
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Extract variant data from VCF files to CSV files.")
-    parser.add_argument("--path", help="Path to the directory containing VCF files.")
-    parser.add_argument("--chrom", required=True, help="Chromosome to extract (e.g., chrX).")
-    parser.add_argument("--start", default="", help="Start position of the region to extract.")
-    parser.add_argument("--end", default="", help="End position of the region to extract.")
+    return output_file, wrote_to_file, filename
 
-    args = parser.parse_args()
-    temp_dir = 'temp_csvs'
 
-    extract_variants(temp_dir,args.path, args.chrom, args.start, args.end)
-
-    extract_annotations(args.chrom, args.start, '101397903')
+#annotate vcf files using annovar
+def annovar_annotate(annovar_path, file):
+    basename = file.split('/')[-1].split('.vcf')[0]  # Extract the base name of the file
+    command = f"{annovar_path}/table_annovar.pl  {file}  {annovar_path}/humandb/ -buildver hg38 -protocol refGene,clinvar_20240917,revel -operation g,f,f -nastring . -vcfinput -out annotated_{basename}"
+    os.

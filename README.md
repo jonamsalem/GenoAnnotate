@@ -15,6 +15,7 @@ GenoAnnotate helps researchers and clinicians analyze genetic variants by:
 - Python 3.6+
 - cyvcf2 (`pip install cyvcf2`)
 - Properly formatted VCF files (bgzipped and indexed with tabix)
+- [`Annovar`](#annovar-instructions) (for local execution). See instructions below.
 
 ## Installation
 
@@ -40,21 +41,54 @@ tabix -p vcf your_file.vcf.gz
 ```
 
 
-### Basic Usage
+### Example Usage
 
 ```bash
-$ python3 variant_extract.py --path 'vcfs' --chrom 'chrX' 
-
+$ python3 variant_extract.py --path './vcfs' --chrom 'chrX' --annovar '~/annovar' --vaf '0.05' --start '101397803' --end '101407925'
 ```
 
-### Advanced Filtering
+Command-line Flags
 
-```python
-from genoAnnotate import filter_variants
+| Flag         | Required | Description                                                                 |
+|--------------|----------|-----------------------------------------------------------------------------|
+| `--path`     | Yes      | Path to the directory containing `.vcf.gz` files.                           |
+| `--chrom`    | Yes      | Chromosome to extract from (e.g., `chrX`, `chr1`).                 |
+| `--annovar`  | Yes      | Full path to the ANNOVAR directory containing `table_annovar.pl` and `humandb/`. |
+| `--vaf`      | No       | Variant Allele Frequency threshold (e.g., `0.05`). Defaults to `0.05`.     |
+| `--start`    | No       | Start genomic coordinate (e.g., `101397803`). Optional if `--end` is not used. |
+| `--end`      | No       | End genomic coordinate (e.g., `101407925`). Optional if `--start` is not used. |
 
-# Filter variants based on quality and depth
-filter_variants('input.vcf.gz', 'output.vcf', min_quality=30, min_depth=20)
+
+
+
+## Annovar Instructions
+
+
+To run the program locally, [Annovar](https://annovar.openbioinformatics.org/en/latest/) must be installed.
+
+**Option 1 (Preferred)**
+
+Register on the Annovar website to download the most up-to-date version of Annovar.
+
+**Option 2**
+
+Download Annovar directly:
+
+```bash
+wget http://www.openbioinformatics.org/annovar/download/0wgxR2rIVP/annovar.latest.tar.gz
+tar -xzvf annovar.latest.tar.gz
 ```
+
+After installation, navigate to the `annovar` directory and execute the following commands:
+
+```bash
+./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar clinvar_20240917 humandb/
+./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar revel humandb/
+./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar gnomad_exome humandb/
+```
+
+These databases are used to annotate variant files. 
+
 
 ## Contributing
 
