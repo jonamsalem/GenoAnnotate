@@ -48,7 +48,7 @@ tabix -p vcf your_file.vcf.gz
 ### Example Usage
 
 ```bash
-$ python3 variant_extract.py --path './vcfs' --chrom 'chrX' --annovar '~/annovar' --vaf '0.05' --start '101397803' --end '101407925'
+$ python3 variant_extract.py --path './vcfs' --chrom 'chrX' --annovar '~/annovar' --vaf '0.30' --start '101397803' --end '101407925'
 ```
 
 Command-line Flags
@@ -87,13 +87,13 @@ tar -xzvf annovar.latest.tar.gz
 After installation, navigate to the `annovar` directory and execute the following commands:
 
 ```bash
-./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar clinvar_20240917 humandb/
-./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar revel humandb/
+./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar clinvar_20240917 humandb/ && 
+./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar revel humandb/ && 
 ./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar refGene humandb/
 
-echo "export ANNOVAR_PATH=\"$(pwd)\"" >> ~/.bashrc
+echo "export ANNOVAR_PATH_GENOANOTATE=\"$(pwd)\"" >> ~/.bashrc
 source ~/.bashrc
-echo $ANNOVAR_PATH #copy the output as it will serve as the path for Annovar for GenoAnnotate
+echo $ANNOVAR_PATH_GENOANOTATE #copy the output as it will serve as the path for Annovar for GenoAnnotate
 ```
 
 This script will save the path to Annovar as well as download necessary databases for annotations 
@@ -112,4 +112,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-

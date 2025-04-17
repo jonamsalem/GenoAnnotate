@@ -25,7 +25,7 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
         return
 
     if provided_vaf == "":
-        provided_vaf = 0.05
+        provided_vaf = 0.20
     else:
         try:
             provided_vaf = float(provided_vaf)
