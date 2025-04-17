@@ -1,8 +1,6 @@
 # GenoAnnotate
 
-A Python tool for identifying pathogenic and novel genetic variants from VCF files.
-
-GenoAnnotate currently supports only hg38 data and is designed for per-sample VCFs.
+A Python tool for identifying pathogenic and novel genetic variants from per-sample VCF files.
 ## Overview
 
 GenoAnnotate helps researchers and clinicians analyze genetic variants by:
@@ -61,6 +59,7 @@ Command-line Flags
 | `--vaf`      | No       | Variant Allele Frequency threshold (e.g., `0.05`). Defaults to `0.05`.     |
 | `--start`    | No       | Start genomic coordinate (e.g., `101397803`).|
 | `--end`      | No       | End genomic coordinate (e.g., `101407925`).|
+| `--ref`      | No       | Human reference genome version (hg38/hg19). Default is hg38. |
 
 
 
@@ -86,11 +85,22 @@ tar -xzvf annovar.latest.tar.gz
 
 After installation, navigate to the `annovar` directory and execute the following commands:
 
+For hg38:
+
 ```bash
 ./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar clinvar_20240917 humandb/ && 
 ./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar revel humandb/ && 
 ./annotate_variation.pl -buildver hg38 -downdb -webfrom annovar refGene humandb/
+```
 
+For hg19:
+```bash
+./annotate_variation.pl -buildver hg19 -downdb -webfrom annovar clinvar_20240917 humandb/ && 
+./annotate_variation.pl -buildver hg19 -downdb -webfrom annovar revel humandb/ && 
+./annotate_variation.pl -buildver hg19 -downdb -webfrom annovar refGene humandb/
+```
+
+```bash
 echo "export ANNOVAR_PATH_GENOANOTATE=\"$(pwd)\"" >> ~/.bashrc
 source ~/.bashrc
 echo $ANNOVAR_PATH_GENOANOTATE #copy the output as it will serve as the path for Annovar for GenoAnnotate

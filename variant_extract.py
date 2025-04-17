@@ -19,10 +19,10 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
     #check if file is gzipped and indexed using tabix
     if not file.endswith('.vcf.gz'):
         logging.error(f"File {file} is not a gzipped VCF file.")
-        return
+        return None, False  
     if not os.path.exists(file + '.tbi'):
         logging.error(f"File {file} is not indexed. Please index the file before proceeding.")
-        return
+        return None, False  
 
     if provided_vaf == "":
         provided_vaf = 0.20
@@ -97,32 +97,38 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
 
 
 #annotate vcf files using annovar
-def annovar_annotate(annovar_path, file):
+def annovar_annotate(annovar_path, outputs_dir, file, ref):
     basename = file.split('/')[-1].split('.vcf')[0]  # Extract the base name of the file
-    command_annovar = f"{annovar_path}/table_annovar.pl  {file}  {annovar_path}/humandb/ -buildver hg38 -protocol refGene,clinvar_20240917,revel -operation g,f,f -nastring . -vcfinput -out annotated_{basename}"
+    print('ref:', ref)
+    command_annovar = f"{annovar_path}/table_annovar.pl {file} {annovar_path}/humandb/ -buildver {ref} -protocol refGene,clinvar_20240917,revel -operation g,f,f -nastring . -vcfinput -out {outputs_dir}/annotated_{basename}"
+    
     try:
         subprocess.run(
             command_annovar,
             shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
         )
     except subprocess.CalledProcessError as e:
         logging.error(f"Annovar failed for {file} (exit {e.returncode}).")
 
 
 
-def annotate(file, temp_dir, chrom, start, end, vaf, annovar_path):
+def annotate(file, temp_dir, outputs_dir, chrom, start, end, vaf, annovar_path, ref):
+    if ref != 'hg38' and ref != 'hg19':
+        logging.warning(f"Invalid reference genome version {ref}. Defaulting to hg38.")
+        ref = 'hg38'
+
     output_file, wrote_to_file = vcf_extract(file, temp_dir,chrom, start,end, vaf)
     if wrote_to_file:
-        annovar_annotate(annovar_path, output_file)
+        annovar_annotate(annovar_path, outputs_dir, output_file,ref)
 
         #extract the relevant columns from the output text file
         basename = os.path.basename(output_file)
         filename = basename.split('.vcf')[0] 
 
-        output_file_name = f"annotated_{filename}.hg38_multianno"
+        output_file_name = f"{outputs_dir}/annotated_{filename}.{ref}_multianno"
 
         #pull out the relevant columns into csv file and delete the temp files
         command_csv = f"awk '{{print $1,$2,$3,$4,$5,$6,$7,$15,$24}}' {output_file_name}.txt > {output_file_name}.csv"
@@ -139,7 +145,7 @@ def annotate_wrapper(args):
 
 #main function to extract vcf data into temp csv files
 #todo: implement multiprocessing or convert to bash for parallel jobs
-def annotate_variants(temp_dir, path, chrom,start="",end="", vaf="", annovar_path=""):
+def annotate_variants(temp_dir, outputs_dir, path, chrom,start="",end="", vaf="", annovar_path="", ref="hg38"):
     if annovar_path == "":
         logging.error("Invalid Annovar path. Please provide a valid path.")
         return
@@ -147,9 +153,8 @@ def annotate_variants(temp_dir, path, chrom,start="",end="", vaf="", annovar_pat
     command_find = 'find ' + path + ' -name "*.vcf.gz"' 
     all_files = subprocess.check_output(command_find, shell=True).decode('utf-8').splitlines()
 
-    os.makedirs(temp_dir, exist_ok=True)
     
-    args_list = [(file, temp_dir, chrom, start, end, vaf, annovar_path) for file in all_files]
+    args_list = [(file, temp_dir,outputs_dir, chrom, start, end, vaf, annovar_path, ref) for file in all_files]
 
     # Use all available CPUs
     with Pool(processes=cpu_count()) as pool:
@@ -170,11 +175,16 @@ if __name__ == "__main__":
     parser.add_argument("--end", default="", help="End position of the region to extract.")
     parser.add_argument("--vaf", default="", help="VAF threshold for filtering variants.")
     parser.add_argument("--annovar", default="", help="Annovar path to the directory containing annovar files.")
+    parser.add_argument("--ref", default="hg38", help="Human reference genome version (default: hg38).")
 
     args = parser.parse_args()
     temp_dir = 'temp_vcfs' #temporary directory to store intermediate files
+    os.makedirs(temp_dir, exist_ok=True)
 
-    annotate_variants(temp_dir=temp_dir, path=args.path, chrom=args.chrom, start=args.start, end=args.end, vaf=args.vaf, annovar_path=args.annovar)
+    outputs_dir = 'outputs'
+    os.makedirs(outputs_dir, exist_ok=True)
+
+    annotate_variants(temp_dir=temp_dir, outputs_dir=outputs_dir, path=args.path, chrom=args.chrom, start=args.start, end=args.end, vaf=args.vaf, annovar_path=args.annovar, ref=args.ref)
 
     #delete temp directory
     command_vcf_cleanp = f"rm -rf {temp_dir}"
