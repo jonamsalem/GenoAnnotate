@@ -1,6 +1,5 @@
 import pandas as pd
 from pathlib import Path
-from pathlib import Path
 
 def generate_report(output_dir):
     files = Path(output_dir).glob("*.txt")
@@ -29,6 +28,8 @@ def generate_report(output_dir):
     data.loc[snv_mask, 'is_transition'] = data.loc[snv_mask, 'mutation'].isin(transitions)
     data.loc[snv_mask, 'is_transversion'] = data.loc[snv_mask, 'mutation'].isin(transversions)
         
+    data['is_insertion'] = (data['Ref'] == '-') | ((data['Ref'].str.len() == 1) & (data['Alt'].str.len() > 1))
+    data['is_deletion'] = (data['Alt'] == '-') | ((data['Ref'].str.len() > 1) & (data['Alt'].str.len() == 1))
     report = {}
     
     # 1. Total mutations
@@ -58,6 +59,8 @@ def generate_report(output_dir):
         report['Ts/Tv ratio'] = report['Transitions'] / report['Transversions']
     else:
         report['Ts/Tv ratio'] = float('nan')
+    report['Insertions'] = sum(data['is_insertion'])
+    report['Deletions'] = sum(data['is_deletion'])
     
     # 5. Genes with mutations
     report['Unique Genes'] = data['Gene.refGene'].nunique()

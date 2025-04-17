@@ -150,22 +150,31 @@ def annotate_wrapper(args):
     return annotate(*args)
 
 #main function to extract vcf data into temp csv files
-def annotate_variants(temp_dir, outputs_dir, path, chrom,start="",end="", vaf="", annovar_path="", ref="hg38"):
+def annotate_variants(temp_dir, outputs_dir, path, chrom, start="", end="", vaf="", annovar_path="", ref="hg38"):
     if annovar_path == "":
         logging.error("Invalid Annovar path. Please provide a valid path.")
-        return
-    
-    command_find = 'find ' + path + ' -name "*.vcf.gz"' 
-    all_files = subprocess.check_output(command_find, shell=True).decode('utf-8').splitlines()
+        return None
 
-    
-    args_list = [(file, temp_dir,outputs_dir, chrom, start, end, vaf, annovar_path, ref) for file in all_files]
+    try:
+        command_find = f'find {path} -name "*.vcf.gz"'
+        all_files = subprocess.check_output(command_find, shell=True).decode('utf-8').splitlines()
 
-    #multiprocess the files
-    with Pool(processes=cpu_count()) as pool:
-        pool.map(annotate_wrapper, args_list)
+        if not all_files:
+            logging.error("No vcf.gz files found in the specified directory.")
+            return None
+
+        args_list = [(file, temp_dir, outputs_dir, chrom, start, end, vaf, annovar_path, ref) for file in all_files]
+
+        # multiprocess the files
+        with Pool(processes=cpu_count()) as pool:
+            pool.map(annotate_wrapper, args_list)
+
+        logging.info(f"{len(all_files)} VCF files processed.")
+        return "Success"
     
-    logging.info(f"{len(all_files)} VCF files processed.")
+    except Exception as e:
+        logging.error(f"An error occurred during annotation: {e}")
+        return None
 
                 
 
@@ -190,14 +199,14 @@ if __name__ == "__main__":
     outputs_dir = 'outputs'
     os.makedirs(outputs_dir, exist_ok=True)
 
-    annotate_variants(temp_dir=temp_dir, outputs_dir=outputs_dir, path=args.path, chrom=args.chrom, start=args.start, end=args.end, vaf=args.vaf, annovar_path=args.annovar, ref=args.ref)
+    result = annotate_variants(temp_dir=temp_dir, outputs_dir=outputs_dir, path=args.path, chrom=args.chrom, start=args.start, end=args.end, vaf=args.vaf, annovar_path=args.annovar, ref=args.ref)
 
     #delete temp directory
     command_vcf_cleanp = f"rm -rf {temp_dir}"
     subprocess.run(command_vcf_cleanp, shell=True)
 
     #generate report
-    if args.report.lower() == "true":
+    if args.report.lower() == "true" and result == "Success":
         generate_report(outputs_dir)
         logging.info("Generated HTML report.")
 
