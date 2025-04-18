@@ -10,31 +10,39 @@ from report import generate_report
 logging.basicConfig(
     level=logging.INFO)
 
-DEFAULT_VAF = 0.20 
-DP = 20 
-
-#read each vcf file and save fields to csv file using cyvcf2
-def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
+config = {
+    'DP': 10,  
+    'DEFAULT_VAF': 0.05, 
+   'ANNOVAR_FEATURES': {
+    'columns': [1, 2, 3, 4, 5, 6, 7, 9, 15, 24],
+    'names': [
+    'Chrom', 'Start', 'End', 'Ref', 'Alt', 'Func.refGene', 'Gene.refGene', 'ExonicFunc.refGene', 'CLNSIG', 'REVEL'
+    ]}
     
-    basename = os.path.basename(file)
+
+}
+
+#filter vcf file and save to temp directory
+def vcf_extract(input_vcf,temp_dir, chrom, start,end,provided_vaf):
+    
+    if not input_vcf.endswith('.vcf.gz'):
+        logging.error(f"File {input_vcf} is not a gzipped VCF file.")
+        return None, False  
+    if not os.path.exists(input_vcf + '.tbi'):
+        logging.error(f"File {input_vcf} is not indexed. Please index the file before proceeding.")
+        return None, False  
+
+    basename = os.path.basename(input_vcf)
     filename = basename.split('.vcf')[0] #extract basename of file 
     
-    #check if file is gzipped and indexed using tabix
-    if not file.endswith('.vcf.gz'):
-        logging.error(f"File {file} is not a gzipped VCF file.")
-        return None, False  
-    if not os.path.exists(file + '.tbi'):
-        logging.error(f"File {file} is not indexed. Please index the file before proceeding.")
-        return None, False  
-
     if provided_vaf == "":
-        provided_vaf = DEFAULT_VAF
+        provided_vaf = config['DEFAULT_VAF']  
     else:
         try:
             provided_vaf = float(provided_vaf)
         except ValueError:
             logging.error("Invalid VAF value. Please provide a numeric value.")
-            return
+            return None, False
 
 
     #check if file exists and if so add -1 to filename
@@ -45,9 +53,14 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
         output_file_name += '-1'
     
 
-    vcf = VCF(file)
-    region = f"{chrom}:{start}-{end}"
-    variants = list(vcf(region))  # Evaluate the iterator once
+    vcf = VCF(input_vcf)
+    if chrom == "":
+        logging.info("No region specified. Processing the entire VCF file.")
+        variants = list(vcf)
+    else:
+        region = f"{chrom}:{start}-{end}"
+        variants = list(vcf(region))  # Evaluate the iterator once
+
     w = Writer(output_file_name, vcf)
 
     wrote_to_file = False
@@ -55,12 +68,16 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
     # Filter variants
     for variant in variants:
         pass_filters = True 
-
         try:
             dp_values = variant.format('DP')
-            if dp_values[0][0] < DP:
+            if dp_values[0][0] < config['DP']:
                 pass_filters = False
+        except :
+            logging.warning(f"DP format not found for variant {variant}. Skipping.") 
+            pass_filters = False
 
+        
+        try:
             #calculate VAF from AD
             ref_freq = variant.format('AD')[0][0]
             alt_freq = variant.format('AD')[0][1]
@@ -72,37 +89,41 @@ def vcf_extract(file,temp_dir, chrom, start,end,provided_vaf):
 
             if vaf < provided_vaf: 
                 pass_filters = False
-           
+        except :
+            logging.warning(f"AD format not found for variant {variant}. Skipping.")
+            pass_filters = False
+        try:
             if variant.QUAL < 30:  
-                pass_filters = False   
-             
-        except Exception as e:
-            logging.error(f"Error processing variant {variant}: {e}")
+                pass_filters = False 
+        except :
+            logging.warning(f"QUAL attribute not found for variant {variant}. Skipping.")
             pass_filters = False
 
         if pass_filters:
             w.write_record(variant)
             wrote_to_file = True
             variants_passed += 1
-        
+
+
     vcf.close()
     w.close()
 
     # Check if any variants were written to the file
     if not wrote_to_file:
-        logging.warning(f"No variants passed the filters for {file}")
+        logging.warning(f"No variants passed the filters for {input_vcf}")
         os.remove(output_file_name)
 
-    logging.info(f"Extracted {variants_passed} variants from {file}")
+    logging.info(f"Extracted {variants_passed} variants from {input_vcf}")
 
     return output_file_name, wrote_to_file
 
 
 
 #annotate vcf files using annovar
-def annovar_annotate(annovar_path, outputs_dir, file, ref):
-    basename = file.split('/')[-1].split('.vcf')[0]  # Extract the base name of the file
-    command_annovar = f"{annovar_path}/table_annovar.pl {file} {annovar_path}/humandb/ -buildver {ref} -protocol refGene,clinvar_20240917,revel -operation g,f,f -nastring . -vcfinput -out {outputs_dir}/annotated_{basename}"
+def annovar_annotate(annovar_path, outputs_dir, filtered_vcf, ref):
+    basename = filtered_vcf.split('/')[-1].split('.vcf')[0]  # Extract the base name of the file
+    annovar_output = f'{outputs_dir}/annotated_{basename}'
+    command_annovar = f"{annovar_path}/table_annovar.pl {filtered_vcf} {annovar_path}/humandb/ -buildver {ref} -protocol refGene,clinvar_20240917,revel -operation g,f,f -nastring . -vcfinput -out {annovar_output}"
     
     try:
         subprocess.run(
@@ -113,36 +134,55 @@ def annovar_annotate(annovar_path, outputs_dir, file, ref):
             stderr=subprocess.PIPE
         )
     except subprocess.CalledProcessError as e:
-        logging.error(f"Annovar failed for {file} (exit {e.returncode}).")
+        logging.error(f"Annovar failed for {filtered_vcf} (exit {e.returncode}).")
+        return None
+
+    return 'Success'
 
 
 
 def annotate(file, temp_dir, outputs_dir, chrom, start, end, vaf, annovar_path, ref):
+   
     if ref != 'hg38' and ref != 'hg19':
         logging.warning(f"Invalid reference genome version {ref}. Defaulting to hg38.")
         ref = 'hg38'
 
     output_file, wrote_to_file = vcf_extract(file, temp_dir,chrom, start,end, vaf)
+    if output_file is None:
+        logging.error(f"Failed to extract VCF file {file}.")
+        return None
+    
     if wrote_to_file:
-        annovar_annotate(annovar_path, outputs_dir, output_file,ref)
-
+        result = annovar_annotate(annovar_path, outputs_dir, output_file,ref)
+        if result is None:
+            logging.error(f"Annovar failed for {output_file}.")
+            return None
+        
         #extract the relevant columns from the output text file
         basename = os.path.basename(output_file)
         filename = basename.split('.vcf')[0] 
 
         output_file_name = f"{outputs_dir}/annotated_{filename}.{ref}_multianno"
 
-        #pull out the relevant columns into csv file and delete the temp files
-        #todo: find better way to do this
-        command_txt = (
-            f"awk -F'\\t' 'BEGIN {{OFS=\"\\t\"}} {{print $1, $2, $3, $4, $5, $6, $7, $9, $15, $24}}' \"{output_file_name}.txt\" > \"{output_file_name}.filtered.{chrom}.txt\""
+        features = config['ANNOVAR_FEATURES']['columns']
+        awk_fields = ', '.join([f"${i}" for i in features])
+        if chrom == "":
+            chrom = "all"
+        awk_command = (
+            f"awk -F'\\t' 'BEGIN {{OFS=\"\\t\"}} {{print {awk_fields}}}' "
+            f"\"{output_file_name}.txt\" > \"{output_file_name}.filtered.{chrom}.txt\""
         )
-        
-        subprocess.run(command_txt, shell=True)
-        logging.info(f"Generated Annotated File: {output_file_name}.txt")
 
-        command_cleanup = f"find . -name 'annotated_{basename}*' -not -name 'annotated_{basename}*.filtered*' -delete"
-        subprocess.run(command_cleanup, shell=True)
+        try:
+            subprocess.run(awk_command, shell=True)
+            logging.info(f"Generated Annotated File: {output_file_name}.txt")
+
+            command_cleanup = f"find . -name 'annotated_{basename}*' -not -name 'annotated_{basename}*.filtered*' -delete"
+            subprocess.run(command_cleanup, shell=True)
+
+        except subprocess.CalledProcessError as e:
+            logging.error(f"An error occurred while processing {output_file_name}: {e}")
+            return None
 
 
 
@@ -154,6 +194,7 @@ def annotate_variants(temp_dir, outputs_dir, path, chrom, start="", end="", vaf=
     if annovar_path == "":
         logging.error("Invalid Annovar path. Please provide a valid path.")
         return None
+         
 
     try:
         command_find = f'find {path} -name "*.vcf.gz"'
@@ -179,12 +220,11 @@ def annotate_variants(temp_dir, outputs_dir, path, chrom, start="", end="", vaf=
                 
 
 
-
 #function call and params
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract variant data from VCF files to CSV files.")
     parser.add_argument("--path", help="Path to the directory containing VCF files.")
-    parser.add_argument("--chrom", required=True, help="Chromosome to extract (e.g., chrX).")
+    parser.add_argument("--chrom",default="", help="Chromosome to extract (e.g., chrX).")
     parser.add_argument("--start", default="", help="Start position of the region to extract.")
     parser.add_argument("--end", default="", help="End position of the region to extract.")
     parser.add_argument("--vaf", default="", help="VAF threshold for filtering variants.")

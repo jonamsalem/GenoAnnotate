@@ -55,7 +55,7 @@ Command-line Flags
 | Flag         | Required | Description                                                                 |
 |--------------|----------|-----------------------------------------------------------------------------|
 | `--path`     | Yes      | Path to the directory containing `.vcf.gz` files. VCF files can be nested in sub-directories.                          |
-| `--chrom`    | Yes      | Chromosome to extract from (e.g., `chrX`, `chr1`).                 |
+| `--chrom`    | No      | Chromosome to extract from (e.g., `chrX`, `chr1`). Not mandatory but suggested.                 |
 | `--annovar`  | Yes      | Full path to the ANNOVAR (see below) directory containing `table_annovar.pl` and `humandb/`. |
 | `--vaf`      | No       | Variant Allele Frequency threshold (e.g., `0.05`). Defaults to `0.05`.     |
 | `--start`    | No       | Start genomic coordinate (e.g., `101397803`).|
