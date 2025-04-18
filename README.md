@@ -4,7 +4,7 @@ A Python tool for identifying pathogenic and novel genetic variants from per-sam
 ## Overview
 
 GenoAnnotate helps researchers and clinicians analyze genetic variants by:
-- Extracting variants from specific chromosomes and regions
+- Extracting variants from **specific chromosomes and regions**
 - Filtering variants based on customizable criteria
 - Annotating variants with pathogenicity scores and functional predictions
 - Identifying novel variants not present in population databases
